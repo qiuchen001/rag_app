@@ -6,19 +6,24 @@ import numpy as np # 处理嵌入向量数据，用于FAISS向量检索
 import dashscope #调用Qwen大模型
 from http import HTTPStatus #检查与Qwen模型HTTP请求状态
 
-# `tokenizers` 库不使用并行化操作, 避免多线程或多进程环境中引发冲突或死锁
-import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import os # 引入操作系统库，后续配置环境变量与获得当前文件路径使用
+os.environ["TOKENIZERS_PARALLELISM"] = "false" # 不使用分词并行化操作, 避免多线程或多进程环境中运行多个模型引发冲突或死锁
+
+# 设置Qwen系列具体模型及对应的调用API密钥，从阿里云百炼大模型服务平台获得
+qwen_model = "qwen-turbo"
+qwen_api_key = "your_api_key"
 
 def load_embedding_model():
     """
-    加载acge_text_embedding模型
-    :return: 返回加载的acge_text_embedding模型
+    加载bge-small-zh-v1.5模型
+    :return: 返回加载的bge-small-zh-v1.5模型
     """
     print(f"加载Embedding模型中")
-    embedding_model = SentenceTransformer('acge_text_embedding')
-    print(f"加载完成，Embedding模型最大序列长度: {embedding_model.max_seq_length}")
+    # SentenceTransformer读取绝对路径下的bge-small-zh-v1.5模型，非下载
+    embedding_model = SentenceTransformer(os.path.abspath('rag_app/bge-small-zh-v1.5'))
+    print(f"bge-small-zh-v1.5模型最大输入长度: {embedding_model.max_seq_length}") 
     return embedding_model
+
 
 def indexing_process(pdf_file, embedding_model):
     """
@@ -29,9 +34,9 @@ def indexing_process(pdf_file, embedding_model):
     """
     # PyPDFLoader加载PDF文件，忽略图片提取
     pdf_loader = PyPDFLoader(pdf_file, extract_images=False)
-    # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为1024字符（非token），相邻文本块之间的重叠200字符（非token）
+    # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为512字符（非token），相邻文本块之间的重叠128字符（非token）
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=512, chunk_overlap=256
+        chunk_size=768, chunk_overlap=256
     )
     # 加载PDF文档,提取所有页的文本内容
     pdf_content_list = pdf_loader.load()
@@ -55,10 +60,10 @@ def indexing_process(pdf_file, embedding_model):
     embeddings_np = np.array(embeddings)
 
     # 获取嵌入向量的维度（每个向量的长度）
-    d = embeddings_np.shape[1]
+    dimension = embeddings_np.shape[1]
 
     # 使用余弦相似度创建FAISS索引
-    index = faiss.IndexFlatIP(d)
+    index = faiss.IndexFlatIP(dimension)
     # 将所有的嵌入向量添加到FAISS索引中，后续可以用来进行相似性检索
     index.add(embeddings_np)
 
@@ -68,9 +73,9 @@ def indexing_process(pdf_file, embedding_model):
 
 def retrieval_process(query, index, chunks, embedding_model, top_k=3):
     """
-    检索流程：将用户查询Query转化为嵌入向量，并在FAISS索引中检索最相似的前k个文本块。
+    检索流程：将用户查询Query转化为嵌入向量，并在Faiss索引中检索最相似的前k个文本块。
     :param query: 用户查询语句
-    :param index: 已建立的FAISS向量索引
+    :param index: 已建立的Faiss向量索引
     :param chunks: 原始文本块内容列表
     :param embedding_model: 预加载的嵌入模型
     :param top_k: 返回最相似的前K个结果
@@ -78,10 +83,10 @@ def retrieval_process(query, index, chunks, embedding_model, top_k=3):
     """
     # 将查询转化为嵌入向量，normalize_embeddings表示对嵌入向量进行归一化
     query_embedding = embedding_model.encode(query, normalize_embeddings=True)
-    # 将嵌入向量转化为numpy数组，FAISS索引操作需要numpy数组输入
+    # 将嵌入向量转化为numpy数组，Faiss索引操作需要numpy数组输入
     query_embedding = np.array([query_embedding])
 
-    # 在 FAISS 索引中使用 query_embedding 进行搜索，检索出最相似的前 top_k 个结果。
+    # 在 Faiss 索引中使用 query_embedding 进行搜索，检索出最相似的前 top_k 个结果。
     # 返回查询向量与每个返回结果之间的相似度得分（在使用余弦相似度时，值越大越相似）排名列表distances，最相似的 top_k 个文本块在原始 chunks 列表中的索引indices。
     distances, indices = index.search(query_embedding, top_k)
 
@@ -109,12 +114,12 @@ def generate_process(query, chunks):
     """
     生成流程：调用Qwen大模型云端API，根据查询和文本块生成最终回复。
     :param query: 用户查询语句
-    :param context: 从检索过程中获得的相关文本块上下文chunks
+    :param chunks: 从检索过程中获得的相关文本块上下文chunks
     :return: 返回生成的响应内容
     """
     # 设置Qwen系列具体模型及对应的调用API密钥，从阿里云大模型服务平台百炼获得
-    llm_model = 'qwen-turbo'
-    dashscope.api_key = "sk-3c22c99beb664ce5bdf562a0ad4c5df0"
+    llm_model = qwen_model
+    dashscope.api_key = qwen_api_key
 
     # 构建参考文档内容，格式为“参考文档1: \n 参考文档2: \n ...”等
     context = ""
@@ -154,16 +159,18 @@ def generate_process(query, chunks):
     except Exception as e:
         print(f"大模型生成过程中发生错误: {e}")
         return None
-    
+
 def main():
-    query="报告中涉及了那几个行业的案例以及总结各自面临的挑战"
-    acge_text_embedding_model = load_embedding_model()
+    print("RAG过程开始.")
+
+    query="下面报告中涉及了哪几个行业的案例以及总结各自面临的挑战？"
+    embedding_model = load_embedding_model()
 
     # 索引流程：加载PDF文件，分割文本块，计算嵌入向量，存储在FAISS索引中（内存）
-    index, chunks = indexing_process('test.pdf', acge_text_embedding_model)
+    index, chunks = indexing_process('rag_app/test.pdf', embedding_model)
 
     # 检索流程：将用户查询转化为嵌入向量，检索最相似的文本块
-    retrieval_chunks = retrieval_process(query, index, chunks, acge_text_embedding_model)
+    retrieval_chunks = retrieval_process(query, index, chunks, embedding_model)
 
     # 生成流程：调用Qwen大模型生成响应
     generate_process(query, retrieval_chunks)
