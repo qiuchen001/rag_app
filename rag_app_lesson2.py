@@ -34,9 +34,9 @@ def indexing_process(pdf_file, embedding_model):
     """
     # PyPDFLoader加载PDF文件，忽略图片提取
     pdf_loader = PyPDFLoader(pdf_file, extract_images=False)
-    # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为512字符（非token），相邻文本块之间的重叠128字符（非token）
+    # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为768字符（非token），相邻文本块之间的重叠256字符（非token）
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=768, chunk_overlap=256
+        chunk_size=512, chunk_overlap=128
     )
     # 加载PDF文档,提取所有页的文本内容
     pdf_content_list = pdf_loader.load()
@@ -167,7 +167,7 @@ def main():
     embedding_model = load_embedding_model()
 
     # 索引流程：加载PDF文件，分割文本块，计算嵌入向量，存储在FAISS索引中（内存）
-    index, chunks = indexing_process('rag_app/test.pdf', embedding_model)
+    index, chunks = indexing_process('rag_app/test_lesson2.pdf', embedding_model)
 
     # 检索流程：将用户查询转化为嵌入向量，检索最相似的文本块
     retrieval_chunks = retrieval_process(query, index, chunks, embedding_model)
