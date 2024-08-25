@@ -22,7 +22,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false" # 不使用分词并行化操作,
 
 # 设置Qwen系列具体模型及对应的调用API密钥，从阿里云百炼大模型服务平台获得
 qwen_model = "qwen-turbo"
-qwen_api_key = "sk-3c22c99beb664ce5bdf562a0ad4c5df0"
+qwen_api_key = "your_api_key"
 
 import os
 
