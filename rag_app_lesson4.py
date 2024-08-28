@@ -10,7 +10,16 @@ from langchain_community.document_loaders import (
     UnstructuredHTMLLoader,
 ) # 从 langchain_community.document_loaders 模块中导入各种文档加载器类
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter # 文档拆分chunk
+from langchain.text_splitter import (
+    CharacterTextSplitter,
+    RecursiveCharacterTextSplitter,
+    MarkdownTextSplitter,
+    PythonCodeTextSplitter,
+    LatexTextSplitter,
+    SpacyTextSplitter,
+    NLTKTextSplitter
+) # 从 langchain.text_splitter 模块中导入各种文档分块类
+
 from sentence_transformers import SentenceTransformer # 加载和使用Embedding模型
 import faiss # Faiss向量库
 import numpy as np # 处理嵌入向量数据，用于Faiss向量检索
@@ -23,6 +32,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false" # 不使用分词并行化操作,
 # 设置Qwen系列具体模型及对应的调用API密钥，从阿里云百炼大模型服务平台获得
 qwen_model = "qwen-turbo"
 qwen_api_key = "your_api_key"
+
 
 def load_document(file_path):
     """
@@ -93,10 +103,15 @@ def indexing_process(folder_path, embedding_model):
             document_text = load_document(file_path)
             print(f"文档 {filename} 的总字符数: {len(document_text)}")
             
-            # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为512字符（非token），相邻文本块之间的重叠128字符（非token）
+            # 配置SpacyTextSplitter分割文本块库
+            #text_splitter = SpacyTextSplitter(
+            #    chunk_size=512, chunk_overlap=128, pipeline="zh_core_web_sm"
+            #)
+
+            # 配置RecursiveCharacterTextSplitter分割文本块
+            # 可以更换为CharacterTextSplitter、MarkdownTextSplitter、PythonCodeTextSplitter、LatexTextSplitter、NLTKTextSplitter等
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=512, chunk_overlap=128
-            )
+            chunk_size=512, chunk_overlap=128)
             
             # 将文档文本分割成文本块Chunk
             chunks = text_splitter.split_text(document_text)
