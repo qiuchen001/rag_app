@@ -12,8 +12,8 @@ from langchain_community.document_loaders import (
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter # 文档拆分chunk
 from sentence_transformers import SentenceTransformer # 加载和使用Embedding模型
-import faiss # FAISS向量库
-import numpy as np # 处理嵌入向量数据，用于FAISS向量检索
+import faiss # Faiss向量库
+import numpy as np # 处理嵌入向量数据，用于Faiss向量检索
 import dashscope #调用Qwen大模型
 from http import HTTPStatus #检查与Qwen模型HTTP请求状态
 
@@ -51,7 +51,7 @@ def load_document(file_path):
     ext = os.path.splitext(file_path)[1]  # 获取文件扩展名，确定文档类型
     loader_tuple = DOCUMENT_LOADER_MAPPING.get(ext)  # 获取文档对应的文档解析加载器类和参数元组
 
-    if loader_tuple:
+    if loader_tuple: # 判断文档格式是否在加载器支持范围
         loader_class, loader_args = loader_tuple  # 解包元组，获取文档解析加载器类和参数
         loader = loader_class(file_path, **loader_args)  # 创建文档解析加载器实例，并传入文档文件路径
         documents = loader.load()  # 加载文档
@@ -76,10 +76,10 @@ def load_embedding_model():
 
 def indexing_process(folder_path, embedding_model):
     """
-    索引流程：加载文件夹中的所有文档文件，并将其内容分割成小块，计算这些小块的嵌入向量并将其存储在FAISS向量数据库中。
+    索引流程：加载文件夹中的所有文档文件，并将其内容分割成文档块，计算这些小块的嵌入向量并将其存储在Faiss向量数据库中。
     :param folder_path: 文档文件夹路径
     :param embedding_model: 预加载的嵌入模型
-    :return: 返回FAISS嵌入向量索引和分割后的文本块原始内容列表
+    :return: 返回Faiss嵌入向量索引和分割后的文本块原始内容列表
     """
     
     # 初始化空的chunks列表，用于存储所有文档文件的文本块
@@ -95,7 +95,7 @@ def indexing_process(folder_path, embedding_model):
             document_text = load_document(file_path)
             print(f"文档 {filename} 的总字符数: {len(document_text)}")
             
-            # 配置RecursiveCharacterTextSplitter分割文本块库参数
+            # 配置RecursiveCharacterTextSplitter分割文本块库参数，每个文本块的大小为512字符（非token），相邻文本块之间的重叠128字符（非token）
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=512, chunk_overlap=128
             )
@@ -225,7 +225,7 @@ def main():
     query="下面报告中涉及了哪几个行业的案例以及总结各自面临的挑战？"
     embedding_model = load_embedding_model()
 
-    # 索引流程：加载文件夹中各种格式文档，分割文本块，计算嵌入向量，存储在FAISS索引中（内存）
+    # 索引流程：加载文件夹中各种格式文档，分割文本块，计算嵌入向量，存储在Faiss索引中（内存）
     index, chunks = indexing_process('rag_app/data_lesson3', embedding_model)
 
     # 检索流程：将用户查询转化为嵌入向量，检索最相似的文本块

@@ -1,8 +1,8 @@
 from langchain_community.document_loaders import PyPDFLoader # PDF文档提取
 from langchain_text_splitters import RecursiveCharacterTextSplitter # 文档拆分chunk
 from sentence_transformers import SentenceTransformer # 加载和使用Embedding模型
-import faiss # FAISS向量库
-import numpy as np # 处理嵌入向量数据，用于FAISS向量检索
+import faiss # Faiss向量库
+import numpy as np # 处理嵌入向量数据，用于Faiss向量检索
 import dashscope #调用Qwen大模型
 from http import HTTPStatus #检查与Qwen模型HTTP请求状态
 
