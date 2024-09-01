@@ -16,9 +16,14 @@ import os
 import dashscope
 from http import HTTPStatus
 
-import chromadb # 引入Chroma向量数据库
-import uuid # 生成唯一ID
-import shutil # 文件操作模块，为了避免既往数据的干扰，在每次启动时清空 ChromaDB 存储目录中的文件
+import chromadb
+import uuid
+import shutil
+
+from rank_bm25 import BM25Okapi # 从 rank_bm25 库中导入 BM25Okapi 类，用于实现 BM25 算法的检索功能
+import jieba # 导入 jieba 库，用于对中文文本进行分词处理
+
+from FlagEmbedding import FlagReranker # 用于对嵌入结果进行重新排序的工具类
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 QWEN_MODEL = "qwen-turbo"
@@ -46,7 +51,6 @@ def load_document(file_path):
         loader = loader_class(file_path, **loader_args)
         documents = loader.load()
         content = "\n".join([doc.page_content for doc in documents])
-        print(f"文档 {file_path} 的部分内容为: {content[:100]}...")
         return content
 
     print(f"不支持的文档类型: '{ext}'")
@@ -55,8 +59,30 @@ def load_document(file_path):
 def load_embedding_model(model_path='rag_app/bge-small-zh-v1.5'):
     print("加载Embedding模型中")
     embedding_model = SentenceTransformer(os.path.abspath(model_path))
-    print(f"bge-small-zh-v1.5模型最大输入长度: {embedding_model.max_seq_length}")
+    print(f"bge-small-zh-v1.5模型最大输入长度: {embedding_model.max_seq_length}\n")
     return embedding_model
+
+def reranking(query, chunks, top_k=3):
+    # 初始化重排序模型，使用BAAI/bge-reranker-v2-m3
+    reranker = FlagReranker('BAAI/bge-reranker-v2-m3', use_fp16=True)
+    
+    # 构造输入对，每个 query 与 chunk 形成一对
+    input_pairs = [[query, chunk] for chunk in chunks]
+    
+    # 计算每个 chunk 与 query 的语义相似性得分
+    scores = reranker.compute_score(input_pairs, normalize=True)
+    
+    print("文档块重排序得分:", scores)
+    
+    # 对得分进行排序并获取排名前 top_k 的 chunks
+    sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    reranking_chunks = [chunks[i] for i in sorted_indices[:top_k]]
+    
+    # 打印前三个 score 对应的文档块
+    for i in range(top_k):
+        print(f"重排序文档块{i+1}: 相似度得分：{scores[sorted_indices[i]]}，文档块信息：{reranking_chunks[i]}\n")
+    
+    return reranking_chunks
 
 def indexing_process(folder_path, embedding_model, collection):
     all_chunks = []
@@ -75,37 +101,68 @@ def indexing_process(folder_path, embedding_model, collection):
                 print(f"文档 {filename} 分割的文本Chunk数量: {len(chunks)}")
 
                 all_chunks.extend(chunks)
-                # 生成每个文本块对应的唯一ID
                 all_ids.extend([str(uuid.uuid4()) for _ in range(len(chunks))])
 
     embeddings = [embedding_model.encode(chunk, normalize_embeddings=True).tolist() for chunk in all_chunks]
 
-    # 将文本块的ID、嵌入向量和原始文本块内容添加到ChromaDB的collection中
     collection.add(ids=all_ids, embeddings=embeddings, documents=all_chunks)
     print("嵌入生成完成，向量数据库存储完成.")
     print("索引过程完成.")
     print("********************************************************")
 
 def retrieval_process(query, collection, embedding_model=None, top_k=6):
+
     query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
+    vector_results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
 
-    # 使用向量数据库检索与query最相似的top_k个文本块
-    results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+    # 从 Chroma collection 中提取所有文档
+    all_docs = collection.get()['documents']
 
+    # 对所有文档进行中文分词
+    tokenized_corpus = [list(jieba.cut(doc)) for doc in all_docs]
+
+    # 使用分词后的文档集合实例化 BM25Okapi，对这些文档进行 BM25 检索的准备工作
+    bm25 = BM25Okapi(tokenized_corpus)
+    # 对查询语句进行分词处理，将分词结果存储为列表
+    tokenized_query = list(jieba.cut(query))
+    # 计算查询语句与每个文档的 BM25 得分，返回每个文档的相关性分数
+    bm25_scores = bm25.get_scores(tokenized_query)
+    
+    # 获取 BM25 检索得分最高的前 top_k 个文档的索引
+    bm25_top_k_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:top_k]
+    # 根据索引提取对应的文档内容
+    bm25_chunks = [all_docs[i] for i in bm25_top_k_indices]
+
+    # 打印 向量 检索结果
     print(f"查询语句: {query}")
-    print(f"最相似的前{top_k}个文本块:")
-
-    retrieved_chunks = []
-    # 打印检索到的文本块ID、相似度和文本块信息
-    for doc_id, doc, score in zip(results['ids'][0], results['documents'][0], results['distances'][0]):
+    print(f"向量检索最相似的前 {top_k} 个文本块:")
+    vector_chunks = []
+    for rank, (doc_id, doc) in enumerate(zip(vector_results['ids'][0], vector_results['documents'][0])):
+        print(f"向量检索排名: {rank + 1}")
         print(f"文本块ID: {doc_id}")
-        print(f"相似度: {score}")
         print(f"文本块信息:\n{doc}\n")
-        retrieved_chunks.append(doc)
+        vector_chunks.append(doc)
+
+    # 打印 BM25 检索结果
+    print(f"BM25 检索最相似的前 {top_k} 个文本块:")
+    for rank, doc in enumerate(bm25_chunks):
+        print(f"BM25 检索排名: {rank + 1}")
+        print(f"文档内容:\n{doc}\n")
+
+    # 合并结果，将 向量 检索的结果放在前面，然后是 BM25 检索的结果
+    # combined_results = vector_chunks + bm25_chunks
+
+    # 使用重排序模型对检索结果进行重新排序，输出重排序后的前top_k文档块
+    reranking_chunks = reranking(query,vector_chunks + bm25_chunks, top_k)
 
     print("检索过程完成.")
     print("********************************************************")
-    return retrieved_chunks
+
+    # 返回合并后的全部结果，共2*top_k个文档块
+    # return combined_results
+
+    # 返回重排序后的前top_k个文档块
+    return reranking_chunks
 
 def generate_process(query, chunks):
     llm_model = QWEN_MODEL
@@ -116,7 +173,7 @@ def generate_process(query, chunks):
         context += f"参考文档{i+1}: \n{chunk}\n\n"
 
     prompt = f"根据参考文档回答问题：{query}\n\n{context}"
-    print(f"生成模型的Prompt: {prompt}")
+    print(prompt+"\n")
 
     messages = [{'role': 'user', 'content': prompt}]
 
@@ -153,12 +210,11 @@ def main():
     if os.path.exists(chroma_db_path):
         shutil.rmtree(chroma_db_path)
 
-    # 创建ChromaDB本地存储实例和collection
-    client = chromadb.PersistentClient(chroma_db_path)
+    client = chromadb.PersistentClient(path=os.path.abspath(chroma_db_path))
     collection = client.get_or_create_collection(name="documents") 
     embedding_model = load_embedding_model()
 
-    indexing_process('rag_app/data_lesson5', embedding_model, collection)
+    indexing_process('rag_app/data_lesson6', embedding_model, collection)
     query = "下面报告中涉及了哪几个行业的案例以及总结各自面临的挑战？"
     retrieval_chunks = retrieval_process(query, collection, embedding_model)
     generate_process(query, retrieval_chunks)
