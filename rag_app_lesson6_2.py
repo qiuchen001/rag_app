@@ -20,8 +20,8 @@ import chromadb
 import uuid
 import shutil
 
-from rank_bm25 import BM25Okapi # 从 rank_bm25 库中导入 BM25Okapi 类，用于实现 BM25 算法的检索功能
-import jieba # 导入 jieba 库，用于对中文文本进行分词处理
+from rank_bm25 import BM25Okapi
+import jieba
 
 from FlagEmbedding import FlagReranker # 用于对嵌入结果进行重新排序的工具类
 
@@ -115,25 +115,17 @@ def retrieval_process(query, collection, embedding_model=None, top_k=6):
     query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
     vector_results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
 
-    # 从 Chroma collection 中提取所有文档
     all_docs = collection.get()['documents']
 
-    # 对所有文档进行中文分词
     tokenized_corpus = [list(jieba.cut(doc)) for doc in all_docs]
 
-    # 使用分词后的文档集合实例化 BM25Okapi，对这些文档进行 BM25 检索的准备工作
     bm25 = BM25Okapi(tokenized_corpus)
-    # 对查询语句进行分词处理，将分词结果存储为列表
     tokenized_query = list(jieba.cut(query))
-    # 计算查询语句与每个文档的 BM25 得分，返回每个文档的相关性分数
     bm25_scores = bm25.get_scores(tokenized_query)
     
-    # 获取 BM25 检索得分最高的前 top_k 个文档的索引
     bm25_top_k_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:top_k]
-    # 根据索引提取对应的文档内容
     bm25_chunks = [all_docs[i] for i in bm25_top_k_indices]
 
-    # 打印 向量 检索结果
     print(f"查询语句: {query}")
     print(f"向量检索最相似的前 {top_k} 个文本块:")
     vector_chunks = []
@@ -143,23 +135,16 @@ def retrieval_process(query, collection, embedding_model=None, top_k=6):
         print(f"文本块信息:\n{doc}\n")
         vector_chunks.append(doc)
 
-    # 打印 BM25 检索结果
     print(f"BM25 检索最相似的前 {top_k} 个文本块:")
     for rank, doc in enumerate(bm25_chunks):
         print(f"BM25 检索排名: {rank + 1}")
         print(f"文档内容:\n{doc}\n")
-
-    # 合并结果，将 向量 检索的结果放在前面，然后是 BM25 检索的结果
-    # combined_results = vector_chunks + bm25_chunks
 
     # 使用重排序模型对检索结果进行重新排序，输出重排序后的前top_k文档块
     reranking_chunks = reranking(query,vector_chunks + bm25_chunks, top_k)
 
     print("检索过程完成.")
     print("********************************************************")
-
-    # 返回合并后的全部结果，共2*top_k个文档块
-    # return combined_results
 
     # 返回重排序后的前top_k个文档块
     return reranking_chunks
@@ -205,7 +190,6 @@ def generate_process(query, chunks):
 def main():
     print("RAG过程开始.")
 
-    # 为了避免既往数据的干扰，在每次启动时清空 ChromaDB 存储目录中的文件
     chroma_db_path = os.path.abspath("rag_app/chroma_db")
     if os.path.exists(chroma_db_path):
         shutil.rmtree(chroma_db_path)
