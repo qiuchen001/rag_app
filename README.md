@@ -1,5 +1,7 @@
 # RAG 开发实战课代码仓库
 
+Github链接，欢迎Star：https://github.com/yangchangcy/GeekbangCourse-Rapid_Development_of_RAG
+
 课程链接：https://time.geekbang.com/column/intro/100804101
 
 玩转 RAG 的保姆级教程!
