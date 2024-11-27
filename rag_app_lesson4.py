@@ -26,12 +26,15 @@ import numpy as np # 处理嵌入向量数据，用于Faiss向量检索
 import dashscope #调用Qwen大模型
 from http import HTTPStatus #检查与Qwen模型HTTP请求状态
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import os # 引入操作系统库，后续配置环境变量与获得当前文件路径使用
 os.environ["TOKENIZERS_PARALLELISM"] = "false" # 不使用分词并行化操作, 避免多线程或多进程环境中运行多个模型引发冲突或死锁
 
 # 设置Qwen系列具体模型及对应的调用API密钥，从阿里云百炼大模型服务平台获得
-qwen_model = "qwen-turbo"
-qwen_api_key = "your_api_key"
+qwen_model = os.getenv("QWEN_MODEL")
+qwen_api_key = os.getenv("QWEN_API_KEY")
 
 
 def load_document(file_path):
@@ -61,6 +64,16 @@ def load_document(file_path):
 
     if loader_tuple: # 判断文档格式是否在加载器支持范围
         loader_class, loader_args = loader_tuple  # 解包元组，获取文档解析加载器类和参数
+
+        # 如果 loader_args 是字典，直接添加 encoding 参数（仅适用于需要 encoding 的加载器）
+        if isinstance(loader_args, dict):
+            if loader_class.__name__ in ['CSVLoader', 'TextLoader']:  # 假设这些加载器需要 encoding 参数
+                loader_args['encoding'] = 'utf-8'  # 或者你认为正确的编码格式
+        else:
+            # 如果 loader_args 不是字典，创建一个新的字典
+            if loader_class.__name__ in ['CSVLoader', 'TextLoader']:  # 假设这些加载器需要 encoding 参数
+                loader_args = {'encoding': 'utf-8', **loader_args}
+
         loader = loader_class(file_path, **loader_args)  # 创建文档解析加载器实例，并传入文档文件路径
         documents = loader.load()  # 加载文档
         content = "\n".join([doc.page_content for doc in documents])  # 多页文档内容组合为字符串
@@ -70,6 +83,7 @@ def load_document(file_path):
     print(file_path+f"，不支持的文档类型: '{ext}'")
     return ""
 
+
 def load_embedding_model():
     """
     加载bge-small-zh-v1.5模型
@@ -77,7 +91,7 @@ def load_embedding_model():
     """
     print(f"加载Embedding模型中")
     # SentenceTransformer读取绝对路径下的bge-small-zh-v1.5模型，非下载
-    embedding_model = SentenceTransformer(os.path.abspath('rag_app/bge-small-zh-v1.5'))
+    embedding_model = SentenceTransformer(os.path.abspath('bge-small-zh-v1.5'))
     print(f"bge-small-zh-v1.5模型最大输入长度: {embedding_model.max_seq_length}") 
     return embedding_model
 
@@ -143,6 +157,7 @@ def indexing_process(folder_path, embedding_model):
 
     return index, all_chunks
 
+
 def retrieval_process(query, index, chunks, embedding_model, top_k=3):
     """
     检索流程：将用户查询Query转化为嵌入向量，并在Faiss索引中检索最相似的前k个文本块。
@@ -181,6 +196,7 @@ def retrieval_process(query, index, chunks, embedding_model, top_k=3):
 
     print("检索过程完成.")
     return results
+
 
 def generate_process(query, chunks):
     """
@@ -232,6 +248,7 @@ def generate_process(query, chunks):
         print(f"大模型生成过程中发生错误: {e}")
         return None
 
+
 def main():
     print("RAG过程开始.")
 
@@ -239,7 +256,7 @@ def main():
     embedding_model = load_embedding_model()
 
     # 索引流程：加载文件夹中各种格式文档，分割文本块，计算嵌入向量，存储在Faiss索引中（内存）
-    index, chunks = indexing_process('rag_app/data_lesson3', embedding_model)
+    index, chunks = indexing_process('data_lesson3', embedding_model)
 
     # 检索流程：将用户查询转化为嵌入向量，检索最相似的文本块
     retrieval_chunks = retrieval_process(query, index, chunks, embedding_model)
